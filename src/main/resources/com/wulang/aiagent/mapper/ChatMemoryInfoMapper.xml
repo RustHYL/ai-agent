@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper
+        PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.wulang.aiagent.mapper.ChatMemoryInfoMapper">
+
+    <resultMap id="BaseResultMap" type="com.wulang.aiagent.model.entity.ChatMemoryInfo">
+            <id property="id" column="id" />
+            <result property="conversationId" column="conversation_id" />
+            <result property="updatedTime" column="updated_time" />
+    </resultMap>
+
+    <sql id="Base_Column_List">
+        id,conversation_id,updated_time,serialized_messages
+    </sql>
+</mapper>

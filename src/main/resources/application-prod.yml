@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: ai-agent
+  #    使用dynamic 配置两个数据库
+  #  datasource:
+  #    dynamic:
+  #      primary: mysql # 设置默认数据源为 mysql
+  #      strict: false # 未匹配到数据源时是否报错
+  #      datasource:
+  #        # MySQL 配置
+  #        mysql:
+  #          driver-class-name: com.mysql.cj.jdbc.Driver
+  #          url: jdbc:mysql://localhost:3306/ai_agent?useSSL=false&serverTimezone=UTC
+  #          username: root
+  #          password: 20001202
+  #        # PostgreSQL (pgvector) 配置
+  #        pg:
+  #          driver-class-name: org.postgresql.Driver
+  #          url: jdbc:postgresql://rm-cn-sre4r4jnw0001jyo.rwlb.rds.aliyuncs.com:5432/ai_agent
+  #          username: maowulang
+  #          password: huangyulong1202!
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    jdbc-url: jdbc:mysql://10.16.102.156:3306/ai_agent?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
+    username: root
+    password: hylSJ15214796392
+
+  ai:
+    pgvector:
+      datasource:
+        jdbc-url: jdbc:postgresql://pgm-bp1o239z5sssg0qr6o.rwlb.rds.aliyuncs.com:5432/ai_agent
+        username: maowulang
+        password: hylSJ15214796392
+        driver-class-name: org.postgresql.Driver
+        hikari:
+          minimum-idle: 2
+          maximum-pool-size: 10
+
+    dashscope:
+      api-key: sk-d9c87af066f545d5946df546d9c2fcf8
+      chat:
+        options:
+          model: qwen-plus
+
+    mcp:
+      client:
+        enabled: false
+search-api:
+  api-key: TZwRsydFHUgJCyUfjzvAuKS7
