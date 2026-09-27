@@ -21,7 +21,10 @@
     <main ref="messageContainerRef" class="message-list">
       <div v-if="messages.length === 0" class="empty-state">
         <h2>开始新的对话</h2>
-        <p>输入你的问题后，AI 会通过 SSE 实时返回内容，并在同一个消息气泡中逐字拼接。</p>
+        <p v-if="responseMode === 'self-manus'">
+          发送问题后，智能体会展示可收起的执行过程，并在下方给出最终交付。
+        </p>
+        <p v-else>输入你的问题后，AI 会通过 SSE 实时返回内容，并在同一个消息气泡中逐字拼接。</p>
       </div>
 
       <div
@@ -34,27 +37,95 @@
           <img :src="getAvatar(message)" :alt="getAvatarAlt(message)" />
         </div>
 
-        <div class="message-body">
+        <div class="message-body" :class="{ 'message-body--agent': message.variant === 'agent' }">
           <div class="message-role">
             {{
               message.role === 'user'
                 ? '我'
                 : message.variant === 'thinking'
-                  ? 'AI 思考过程'
-                  : aiName
+                  ? '执行过程'
+                  : message.variant === 'final'
+                    ? '最终交付'
+                    : aiName
             }}
           </div>
 
           <div class="message-bubble" :class="message.variant ? `message-bubble--${message.variant}` : ''">
-            <template v-if="message.variant === 'thinking'">
+            <template v-if="message.variant === 'agent'">
+              <section v-if="message.groups.length || message.pending" class="agent-process">
+                <header class="agent-process-header">
+                  <span class="agent-process-title">执行过程</span>
+                  <button
+                    class="agent-process-toggle"
+                    type="button"
+                    :aria-expanded="message.processOpen"
+                    @click="toggleProcess(message, $event)"
+                  >
+                    {{ message.processOpen ? '收起' : '展开' }}
+                  </button>
+                </header>
+                <div v-show="message.processOpen" class="agent-process-body">
+                  <p v-if="!message.groups.length" class="agent-pending">正在分析任务...</p>
+                  <article
+                    v-for="group in message.groups"
+                    :key="group.step"
+                    class="agent-step"
+                  >
+                    <h3 class="agent-step-title">步骤 {{ group.step }}</h3>
+                    <div
+                      v-for="item in group.items"
+                      :key="item.id"
+                      class="agent-trace"
+                      :class="[
+                        item.type ? `agent-trace--${item.type.toLowerCase()}` : '',
+                        { 'agent-trace--collapsible': item.collapsible },
+                      ]"
+                    >
+                      <button
+                        v-if="item.collapsible"
+                        class="agent-trace-toggle"
+                        type="button"
+                        :aria-expanded="item.expanded"
+                        @click="toggleTrace(item, $event)"
+                      >
+                        <span class="agent-tag">{{ item.label }}</span>
+                        <span class="agent-chevron" :class="{ open: item.expanded }">></span>
+                      </button>
+                      <span v-else class="agent-tag">{{ item.label }}</span>
+                      <p v-show="!item.collapsible || item.expanded" class="agent-trace-content">{{ item.content }}</p>
+                    </div>
+                  </article>
+                </div>
+              </section>
+              <section v-if="message.answer" class="agent-answer">
+                <h3 class="agent-answer-title">最终交付</h3>
+                <div class="message-content">{{ message.answer }}</div>
+              </section>
+            </template>
+
+            <template v-else-if="message.variant === 'thinking'">
+              <div v-if="!message.steps.length" class="message-content">正在分析任务...</div>
               <div
                 v-for="(step, index) in message.steps"
                 :key="step.id"
                 class="thinking-step"
-                :class="{ 'thinking-step--separated': index > 0 }"
+                :class="[
+                  step.type ? `thinking-step--${step.type.toLowerCase()}` : '',
+                  { 'thinking-step--separated': index > 0 },
+                ]"
               >
-                <div class="thinking-step-title">{{ step.title }}</div>
-                <div class="message-content">{{ step.content }}</div>
+                <button
+                  v-if="step.collapsible"
+                  class="thinking-step-toggle"
+                  type="button"
+                  :aria-expanded="step.expanded"
+                  @click="toggleTrace(step, $event)"
+                >
+                  <span class="thinking-step-title">{{ step.title }}</span>
+                  <span class="agent-chevron" :class="{ open: step.expanded }">></span>
+                </button>
+                <div v-else class="thinking-step-title">{{ step.title }}</div>
+                <div v-show="!step.collapsible || step.expanded" class="message-content">{{ step.content }}</div>
               </div>
             </template>
 
@@ -94,7 +165,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch, watchEffect } from 'vue';
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watchEffect } from 'vue';
 import { useRouter } from 'vue-router';
 import { createChatId, createMessage } from '../utils/chat';
 import SiteFooter from './SiteFooter.vue';
@@ -215,17 +286,6 @@ function handleTextareaKeydown(event) {
   sendMessage();
 }
 
-function ensureFinalMessage(finalMessageRef) {
-  if (finalMessageRef.value) {
-    return finalMessageRef.value;
-  }
-
-  const finalMessage = reactive(createMessage('assistant', '', { variant: 'final' }));
-  finalMessageRef.value = finalMessage;
-  messages.value.push(finalMessage);
-  return finalMessage;
-}
-
 function appendDefaultAssistantChunk(assistantMessage, chunk) {
   assistantMessage.content += chunk;
   nextTick(() => {
@@ -233,24 +293,80 @@ function appendDefaultAssistantChunk(assistantMessage, chunk) {
   });
 }
 
-function appendSelfManusChunk(thinkingMessage, finalMessageRef, chunk) {
-  const text = chunk.trim();
+const AGENT_OUTPUT_TITLES = {
+  THOUGHT: '思考',
+  ACTION: '行动',
+  OBSERVATION: '观察',
+  ANSWER: '最终交付',
+};
+
+function ensureStepGroup(agentMessage, step) {
+  const stepNo = step || agentMessage.groups.length + 1;
+  let group = agentMessage.groups.find((item) => item.step === stepNo);
+  if (!group) {
+    group = { step: stepNo, items: [] };
+    agentMessage.groups.push(group);
+  }
+  return group;
+}
+
+function appendAgentItem(agentMessage, step, type, label, content) {
+  if (!content) {
+    return;
+  }
+  const group = ensureStepGroup(agentMessage, step);
+  const collapsible = type === 'ACTION' || type === 'OBSERVATION';
+  group.items.push({
+    id: `trace_${step || group.step}_${type || 'text'}_${Math.random().toString(36).slice(2, 8)}`,
+    type,
+    label,
+    content,
+    collapsible,
+    expanded: false,
+  });
+}
+
+function appendAnswer(agentMessage, text) {
+  if (!text) {
+    return;
+  }
+  agentMessage.answer = agentMessage.answer ? `${agentMessage.answer}\n${text}` : text;
+}
+
+function appendSelfManusChunk(agentMessage, chunk) {
+  if (chunk && typeof chunk === 'object' && chunk.type) {
+    const label = chunk.label || AGENT_OUTPUT_TITLES[chunk.type] || chunk.type;
+    if (chunk.type === 'ANSWER') {
+      appendAnswer(agentMessage, chunk.content || '');
+      return;
+    }
+    appendAgentItem(agentMessage, chunk.step, chunk.type, label, chunk.content || '');
+    return;
+  }
+
+  const text = String(chunk || '').trim();
   if (!text) {
     return;
   }
 
   const stepMatch = text.match(/^Step\s+(\d+):\s*([\s\S]*)$/);
   if (stepMatch) {
-    thinkingMessage.steps.push({
-      id: `step_${stepMatch[1]}_${Math.random().toString(36).slice(2, 8)}`,
-      title: `步骤 ${stepMatch[1]}`,
-      content: stepMatch[2] || '处理中...',
-    });
+    appendAgentItem(agentMessage, Number(stepMatch[1]), 'THOUGHT', '步骤记录', stepMatch[2] || '处理中...');
     return;
   }
 
-  const finalMessage = ensureFinalMessage(finalMessageRef);
-  finalMessage.content += chunk;
+  appendAnswer(agentMessage, text);
+}
+
+function toggleProcess(message, event) {
+  event?.stopPropagation();
+  message.processOpen = !message.processOpen;
+}
+
+function toggleTrace(item, event) {
+  event?.preventDefault();
+  event?.stopPropagation();
+  item.expanded = !item.expanded;
 }
 
 function sendMessage() {
@@ -262,9 +378,14 @@ function sendMessage() {
   const userMessage = reactive(createMessage('user', userText));
   const isSelfManusMode = props.responseMode === 'self-manus';
   const assistantMessage = reactive(isSelfManusMode
-    ? createMessage('assistant', '', { variant: 'thinking', steps: [] })
+    ? createMessage('assistant', '', {
+      variant: 'agent',
+      processOpen: true,
+      pending: true,
+      groups: [],
+      answer: '',
+    })
     : createMessage('assistant', ''));
-  const finalMessageRef = ref(null);
 
   messages.value.push(userMessage, assistantMessage);
   inputValue.value = '';
@@ -277,6 +398,15 @@ function sendMessage() {
       return;
     }
     finished = true;
+    if (isSelfManusMode) {
+      assistantMessage.pending = false;
+      if (!assistantMessage.groups.length && !assistantMessage.answer) {
+        const index = messages.value.indexOf(assistantMessage);
+        if (index >= 0) {
+          messages.value.splice(index, 1);
+        }
+      }
+    }
     isStreaming.value = false;
     activeStream = null;
     scrollToBottom();
@@ -287,7 +417,7 @@ function sendMessage() {
     chatId: sessionId.value,
     onChunk(chunk) {
       if (isSelfManusMode) {
-        appendSelfManusChunk(assistantMessage, finalMessageRef, chunk);
+        appendSelfManusChunk(assistantMessage, chunk);
       } else {
         appendDefaultAssistantChunk(assistantMessage, chunk);
       }
@@ -299,8 +429,7 @@ function sendMessage() {
     onError(error) {
       const errorText = error?.message || '当前会话已结束，未接收到有效响应。请重试。';
       if (isSelfManusMode) {
-        ensureFinalMessage(finalMessageRef).content =
-          finalMessageRef.value?.content || errorText;
+        assistantMessage.answer = assistantMessage.answer || errorText;
       } else if (!assistantMessage.content) {
         assistantMessage.content = errorText;
       }
@@ -308,14 +437,6 @@ function sendMessage() {
     },
   });
 }
-
-watch(
-  messages,
-  () => {
-    scrollToBottom();
-  },
-  { deep: true },
-);
 
 onBeforeUnmount(() => {
   closeActiveStream();

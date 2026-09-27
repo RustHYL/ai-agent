@@ -1,7 +1,12 @@
 package com.wulang.aiagent.agent;
 
+import com.wulang.aiagent.agent.model.AgentOutput;
+import com.wulang.aiagent.agent.model.AgentOutputType;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * ReAct (Reasoning and Acting) 模式的代理抽象类
@@ -10,6 +15,9 @@ import lombok.EqualsAndHashCode;
 @EqualsAndHashCode(callSuper = true)
 @Data
 public abstract class ReActAgent extends BaseAgent {
+
+    @EqualsAndHashCode.Exclude
+    private final List<AgentOutput> stepOutputs = new ArrayList<>();
 
     /**
      * 处理当前状态并决定下一步行动
@@ -26,22 +34,33 @@ public abstract class ReActAgent extends BaseAgent {
     public abstract String act();
 
     /**
+     * 记录本步要展示的一条输出。空白内容不进入结果。
+     */
+    protected void addOutput(AgentOutputType type, String content) {
+        if (content == null || content.isBlank()) {
+            return;
+        }
+        stepOutputs.add(new AgentOutput(type, content.strip()));
+    }
+
+    /**
      * 执行单个步骤：思考和行动
      *
-     * @return 步骤执行结果
+     * @return 本步产生的结构化输出
      */
     @Override
-    public String step() {
+    public List<AgentOutput> step() {
+        stepOutputs.clear();
         try {
             boolean shouldAct = think();
-            if (!shouldAct) {
-                return "思考完成 - 无需行动";
+            if (shouldAct) {
+                act();
             }
-            return act();
+            return List.copyOf(stepOutputs);
         } catch (Exception e) {
-            // 记录异常日志
             e.printStackTrace();
-            return "步骤执行失败: " + e.getMessage();
+            addOutput(AgentOutputType.THOUGHT, "步骤执行失败: " + e.getMessage());
+            return List.copyOf(stepOutputs);
         }
     }
 }

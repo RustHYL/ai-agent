@@ -1,7 +1,7 @@
 <template>
   <ChatPage
     title="AI 超级智能体"
-    description="使用与聊天室一致的交互形式，通过 SSE 调用超级智能体接口，实时拼接 AI 回复内容。"
+    description="智能体会按思考、行动、观察推进任务，完成后单独给出最终交付。"
     :stream-chat="doChatWithSelfManus"
     session-label="本地会话 ID"
     response-mode="self-manus"

@@ -35,8 +35,17 @@ export function parseBaseResponseChunk(raw) {
       }
 
       const data = parsed.data;
+      if (data && typeof data === 'object') {
+        return {
+          chunk: '',
+          event: data,
+          error: null,
+          done: false,
+        };
+      }
       return {
         chunk: data === null || data === undefined ? '' : String(data),
+        event: null,
         error: null,
         done: false,
       };
@@ -76,7 +85,9 @@ export function openChatStream({ path, params, onChunk, onComplete, onError, par
       return;
     }
 
-    if (parsed.chunk) {
+    if (parsed.event) {
+      onChunk?.(parsed.event);
+    } else if (parsed.chunk) {
       onChunk?.(parsed.chunk);
     }
 

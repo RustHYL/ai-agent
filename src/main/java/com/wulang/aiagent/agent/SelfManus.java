@@ -19,9 +19,11 @@ public class SelfManus extends ToolCallAgent {
         this.setSystemPrompt(SYSTEM_PROMPT);
         String NEXT_STEP_PROMPT = """  
                 Based on user needs, proactively select the most appropriate tool or combination of tools.  
-                For complex tasks, you can break down the problem and use different tools step by step to solve it.  
-                After using each tool, clearly explain the execution results and suggest the next steps.  
-                If you want to stop the interaction at any point, use the `terminate` tool/function call.  
+                For complex tasks, break the problem down and use different tools step by step.  
+                Before calling any tool, write your analysis, the task breakdown, and the next action in the assistant text, then call the tools.  
+                After each tool result, use the observation to decide the next step.  
+                When the task is complete, reply with the polished final answer for the user and do not call any tool.  
+                Call `doTerminate` only when you cannot proceed further, and do not call it together with other tools.  
                 """;
         this.setNextStepPrompt(NEXT_STEP_PROMPT);
         this.setMaxSteps(20);

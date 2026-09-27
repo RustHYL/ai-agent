@@ -1,6 +1,8 @@
 package com.wulang.aiagent.agent;
 
 import com.itextpdf.styledxmlparser.jsoup.internal.StringUtil;
+import com.wulang.aiagent.agent.model.AgentOutput;
+import com.wulang.aiagent.agent.model.AgentOutputType;
 import com.wulang.aiagent.agent.model.AgentState;
 import com.wulang.aiagent.common.ResultUtils;
 import com.wulang.aiagent.exception.ErrorCode;
@@ -15,6 +17,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 /**
  * 抽象基础代理类，用于管理代理状态和执行流程。
@@ -70,14 +73,13 @@ public abstract class BaseAgent {
                 currentStep = stepNumber;
                 log.info("Executing step " + stepNumber + "/" + maxSteps);
                 // 单步执行
-                String stepResult = step();
-                String result = "Step " + stepNumber + ": " + stepResult;
+                String result = formatStepResult(stepNumber, step());
                 results.add(result);
             }
             // 检查是否超出步骤限制
-            if (currentStep >= maxSteps) {
+            if (currentStep >= maxSteps && state != AgentState.FINISHED) {
                 state = AgentState.FINISHED;
-                results.add("Terminated: Reached max steps (" + maxSteps + ")");
+                results.add("[最终交付] 执行结束，已达到最大步骤（" + maxSteps + "）");
             }
             return String.join("\n", results);
         } catch (Exception e) {
@@ -99,7 +101,7 @@ public abstract class BaseAgent {
     public SseEmitter runStream(String userPrompt) {
         SseEmitter sseEmitter = new SseEmitter(300000L);
         // 使用线程异步处理 避免阻塞主线程
-        CompletableFuture.runAsync(()-> {
+        CompletableFuture.runAsync(() -> {
             try {
                 if (this.state != AgentState.IDLE) {
                     sseEmitter.send(ResultUtils.error(ErrorCode.OPERATION_ERROR, "错误，无法从这个状态运行代理：" + this.state));
@@ -112,9 +114,11 @@ public abstract class BaseAgent {
                     return;
                 }
             } catch (Exception e) {
+                // 校验阶段发送失败：结束连接并退出，避免继续执行步骤循环
                 sseEmitter.completeWithError(e);
+                return;
             }
-            // 更改状态
+            // 校验通过后才进入运行
             state = AgentState.RUNNING;
             // 记录消息上下文
             messageList.add(new UserMessage(userPrompt));
@@ -125,18 +129,21 @@ public abstract class BaseAgent {
                     int stepNumber = i + 1;
                     currentStep = stepNumber;
                     log.info("Executing step " + stepNumber + "/" + maxSteps);
-                    // 单步执行
-                    String stepResult = step();
-                    String result = "Step " + stepNumber + ": " + stepResult;
-                    results.add(result);
-                    // 输出每一步的结果到sse
-                    sseEmitter.send(ResultUtils.success(result));
+                    // 单步执行，按思考 / 行动 / 观察 / 最终交付分别推送
+                    List<AgentOutput> outputs = step();
+                    for (AgentOutput output : outputs) {
+                        output.setStep(stepNumber);
+                        results.add(formatOutput(output));
+                        sseEmitter.send(ResultUtils.success(output));
+                    }
                 }
-                // 检查是否超出步骤限制
-                if (currentStep >= maxSteps) {
+                // 正常结束不会走到这里；只有步骤用尽仍未交付时才提示
+                if (currentStep >= maxSteps && state != AgentState.FINISHED) {
                     state = AgentState.FINISHED;
-                    results.add("Terminated: Reached max steps (" + maxSteps + ")");
-                    sseEmitter.send(ResultUtils.success("执行结束，达到最大步骤（Terminated: Reached max steps (" + maxSteps + ")）"));
+                    AgentOutput limitOutput = new AgentOutput(AgentOutputType.ANSWER,
+                            "执行结束，已达到最大步骤（" + maxSteps + "）", currentStep);
+                    results.add(formatOutput(limitOutput));
+                    sseEmitter.send(ResultUtils.success(limitOutput));
                 }
                 sseEmitter.complete();
             } catch (Exception e) {
@@ -174,9 +181,26 @@ public abstract class BaseAgent {
     /**
      * 执行单个步骤
      *
-     * @return 步骤执行结果
+     * @return 本步产生的结构化输出
      */
-    public abstract String step();
+    public abstract List<AgentOutput> step();
+
+    private String formatStepResult(int stepNumber, List<AgentOutput> outputs) {
+        if (outputs == null || outputs.isEmpty()) {
+            return "Step " + stepNumber + ": （本步没有可展示的内容）";
+        }
+        String body = outputs.stream()
+                .map(output -> {
+                    output.setStep(stepNumber);
+                    return formatOutput(output);
+                })
+                .collect(Collectors.joining("\n"));
+        return "Step " + stepNumber + ":\n" + body;
+    }
+
+    private String formatOutput(AgentOutput output) {
+        return "[" + output.getLabel() + "] " + output.getContent();
+    }
 
     /**
      * 清理资源

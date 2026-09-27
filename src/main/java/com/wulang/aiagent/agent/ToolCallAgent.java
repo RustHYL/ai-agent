@@ -4,6 +4,7 @@ package com.wulang.aiagent.agent;
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.alibaba.cloud.ai.dashscope.chat.DashScopeChatOptions;
+import com.wulang.aiagent.agent.model.AgentOutputType;
 import com.wulang.aiagent.agent.model.AgentState;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
@@ -61,18 +62,14 @@ public class ToolCallAgent extends ReActAgent{
      */
     @Override
     public boolean think() {
+        // 下一步提示词只写入一次，避免每个步骤重复占用上下文
         if (!nextStepPromptAdded && StrUtil.isNotBlank(getNextStepPrompt())) {
             UserMessage userMessage = new UserMessage(getNextStepPrompt());
             getMessageList().add(userMessage);
             nextStepPromptAdded = true;
         }
-        // 1.校验用户提示词，拼接提示词
-        if (StrUtil.isNotBlank(getNextStepPrompt())) {
-            UserMessage userMessage = new UserMessage(getNextStepPrompt());
-            getMessageList().add(userMessage);
-        }
 
-        // 2.调用ai大模型，获取工具调用结果（需要调用的工具列表）
+        // 调用 AI 大模型，获取工具调用结果（需要调用的工具列表）
         List<Message> messageList = getMessageList();
         log.info("MessageList=======" + getMessageList().toString());
         Prompt prompt = new Prompt(messageList, this.chatOptions);
@@ -88,25 +85,39 @@ public class ToolCallAgent extends ReActAgent{
             AssistantMessage assistantMessage = chatResponse.getResult().getOutput();
             String result = assistantMessage.getText();
             List<AssistantMessage.ToolCall> toolCalls = assistantMessage.getToolCalls();
+            if (toolCalls == null) {
+                toolCalls = List.of();
+            }
             log.info("{}的思考：{}", getName(), result);
             log.info("{}选择了工具：{}个", getName(), toolCalls.size());
-            String toolCallInfo = toolCalls.stream()
-                    .map(toolCall -> String.format("工具名称：%s, 工具参数：%s", toolCall.name(), toolCall.arguments()))
-                    .collect(Collectors.joining("\n"));
+            List<AssistantMessage.ToolCall> businessCalls = toolCalls.stream()
+                    .filter(toolCall -> !"doTerminate".equals(toolCall.name()))
+                    .toList();
+            boolean terminateCalled = toolCalls.size() != businessCalls.size();
+            String toolCallInfo = businessCalls.stream()
+                    .map(toolCall -> "调用 " + toolCall.name() + "\n参数：" + toolCall.arguments())
+                    .collect(Collectors.joining("\n\n"));
             log.info(toolCallInfo);
-            // 如果不需要调用工具
-            if (toolCalls.isEmpty()) {
-                // 记录助手消息
+            // 没有业务工具：正文就是最终答案。终止工具只用来结束循环，不展示给用户
+            if (businessCalls.isEmpty()) {
                 getMessageList().add(assistantMessage);
+                if (StrUtil.isNotBlank(result)) {
+                    addOutput(AgentOutputType.ANSWER, result);
+                    setState(AgentState.FINISHED);
+                } else if (terminateCalled) {
+                    addOutput(AgentOutputType.ANSWER, "任务已结束");
+                    setState(AgentState.FINISHED);
+                }
                 return false;
-            } else {
-                // 需要调用工具，等调用完后再记录助手消息，不需要重复记录
-                return true;
             }
+            addOutput(AgentOutputType.THOUGHT, result);
+            addOutput(AgentOutputType.ACTION, toolCallInfo);
+            return true;
             //异常处理
         } catch (Exception e) {
             log.error(getName() + "的工具思考过程虚线问题：" + e.getMessage());
             getMessageList().add(new AssistantMessage("处理时遇到了错误：" + e.getMessage()));
+            addOutput(AgentOutputType.THOUGHT, "处理时遇到了错误：" + e.getMessage());
             return false;
         }
     }
@@ -130,9 +141,11 @@ public class ToolCallAgent extends ReActAgent{
             setState(AgentState.FINISHED);
         }
         String result = toolResponseMessage.getResponses().stream()
-                .map(response -> "工具：" + response.name() + " 返回的结果：" + response.responseData())
-                .collect(Collectors.joining("\n"));
+                .filter(response -> !"doTerminate".equals(response.name()))
+                .map(response -> response.name() + "：\n" + response.responseData())
+                .collect(Collectors.joining("\n\n"));
         log.info(result);
+        addOutput(AgentOutputType.OBSERVATION, result);
         return result;
     }
 }
