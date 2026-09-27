@@ -1,4 +1,4 @@
-import { openChatStream } from '../utils/sse';
+import { openChatStream, parseBaseResponseChunk } from '../utils/sse';
 
 export const AI_API = {
   loveAppChatSse: '/ai/love_app/chat/sse',
@@ -13,6 +13,7 @@ export function doChatWithLoveAppSse({ message, chatId, onChunk, onComplete, onE
   return openChatStream({
     path: AI_API.loveAppChatSse,
     params: { message, chatId },
+    parseChunk: parseBaseResponseChunk,
     onChunk,
     onComplete,
     onError,
@@ -27,6 +28,7 @@ export function doChatWithSelfManus({ message, onChunk, onComplete, onError }) {
   return openChatStream({
     path: AI_API.selfManusChat,
     params: { message },
+    parseChunk: parseBaseResponseChunk,
     onChunk,
     onComplete,
     onError,

@@ -45,5 +45,13 @@ class LoveAppTest {
         Assertions.assertNotNull(response);
     }
 
+    @Test
+    void exceptionTest() {
+        String chatId = UUID.randomUUID().toString();
+        String message =  "如何平衡工作和家庭责任";
+        String response = loveApp.doChatWithRag(message, chatId);
+        Assertions.assertNotNull(response);
+    }
+
 
 }

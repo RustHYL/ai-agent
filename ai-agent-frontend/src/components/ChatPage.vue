@@ -296,12 +296,13 @@ function sendMessage() {
     onComplete() {
       finishStream();
     },
-    onError() {
+    onError(error) {
+      const errorText = error?.message || '当前会话已结束，未接收到有效响应。请重试。';
       if (isSelfManusMode) {
         ensureFinalMessage(finalMessageRef).content =
-          finalMessageRef.value?.content || '当前会话已结束，未接收到有效响应。请重试。';
+          finalMessageRef.value?.content || errorText;
       } else if (!assistantMessage.content) {
-        assistantMessage.content = '当前会话已结束，未接收到有效响应。请重试。';
+        assistantMessage.content = errorText;
       }
       finishStream();
     },

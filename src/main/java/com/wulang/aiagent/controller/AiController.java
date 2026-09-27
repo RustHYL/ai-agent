@@ -2,6 +2,9 @@ package com.wulang.aiagent.controller;
 
 import com.wulang.aiagent.agent.SelfManus;
 import com.wulang.aiagent.app.LoveApp;
+import com.wulang.aiagent.common.BaseResponse;
+import com.wulang.aiagent.common.ResultUtils;
+
 import jakarta.annotation.Resource;
 import org.springframework.ai.chat.model.ChatModel;
 import org.springframework.ai.tool.ToolCallback;
@@ -12,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 import reactor.core.publisher.Flux;
+import com.wulang.aiagent.exception.ErrorCode;
 
 import java.io.IOException;
 
@@ -30,22 +34,32 @@ public class AiController {
 
 
     @GetMapping("/love_app/chat/sync")
-    public String doChatWithLoveAppSync(String message, String chatId) {
-        return loveApp.doChat(message, chatId);
+    public BaseResponse<String> doChatWithLoveAppSync(String message, String chatId) {
+        String result = loveApp.doChat(message, chatId);
+        return ResultUtils.success(result);
     }
 
 
     @GetMapping(value = "/love_app/chat/sse", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public Flux<String> doChatWithLoveAppSSE(String message, String chatId) {
-        return loveApp.doChatByStream(message, chatId);
+    public Flux<BaseResponse<String>> doChatWithLoveAppSSE(String message, String chatId) {
+        return loveApp.doChatByStream(message, chatId)
+        // 每条数据包装成 BaseResponse 
+        .map(ResultUtils::success) 
+        // 流中出错：发一条错误响应后正常结束流 
+        .onErrorResume(e -> Flux.just(ResultUtils.error(ErrorCode.SYSTEM_ERROR , e.getMessage())));
     }
 
     @GetMapping(value = "/love_app/chat/server_sent_event")
-    public Flux<ServerSentEvent<String>> doChatWithLoveAppServerSentEvent(String message, String chatId) {
+    public Flux<ServerSentEvent<BaseResponse<String>>> doChatWithLoveAppServerSentEvent(String message, String chatId) {
         return loveApp.doChatByStream(message, chatId)
-                .map(chunk -> ServerSentEvent.<String>builder()
-                        .data(chunk)
-                        .build());
+                .map(chunk -> ServerSentEvent.<BaseResponse<String>>builder()
+                        .event("message")
+                        .data(ResultUtils.success(chunk))
+                        .build())
+                .onErrorResume(e -> Flux.just(ServerSentEvent.<BaseResponse<String>>builder()
+                        .event("error")
+                        .data(ResultUtils.error(ErrorCode.SYSTEM_ERROR , e.getMessage()))
+                        .build()));
     }
 
     @GetMapping("/love_app/chat/sse/emitter")
@@ -58,13 +72,19 @@ public class AiController {
                         // 处理每条消息
                         chunk -> {
                             try {
-                                emitter.send(chunk);
+                                emitter.send(ResultUtils.success(chunk));
                             } catch (IOException e) {
                                 emitter.completeWithError(e);
                             }
                         },
-                        // 处理错误
-                        emitter::completeWithError,
+                        // 错误：发一条错误响应，再正常结束 
+                        e -> { 
+                            try {
+                                emitter.send(ResultUtils.error(ErrorCode.SYSTEM_ERROR, e.getMessage()));
+                            } catch (IOException ignored) {
+                            }
+                            emitter.complete();
+                        },
                         // 处理完成
                         emitter::complete
                 );
@@ -83,5 +103,7 @@ public class AiController {
         SelfManus selfManus = new SelfManus(allTools, dashscopeChatModel);
         return selfManus.runStream(message);
     }
+
+
 
 }

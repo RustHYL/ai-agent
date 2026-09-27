@@ -2,6 +2,8 @@ package com.wulang.aiagent.agent;
 
 import com.itextpdf.styledxmlparser.jsoup.internal.StringUtil;
 import com.wulang.aiagent.agent.model.AgentState;
+import com.wulang.aiagent.common.ResultUtils;
+import com.wulang.aiagent.exception.ErrorCode;
 import lombok.Data;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.chat.client.ChatClient;
@@ -100,12 +102,12 @@ public abstract class BaseAgent {
         CompletableFuture.runAsync(()-> {
             try {
                 if (this.state != AgentState.IDLE) {
-                    sseEmitter.send("错误，无法从这个状态运行代理：" + this.state);
+                    sseEmitter.send(ResultUtils.error(ErrorCode.OPERATION_ERROR, "错误，无法从这个状态运行代理：" + this.state));
                     sseEmitter.complete();
                     return;
                 }
                 if (StringUtil.isBlank(userPrompt)) {
-                    sseEmitter.send("错误，不能运用空提示词进行代理（Cannot run agent with empty user prompt）");
+                    sseEmitter.send(ResultUtils.error(ErrorCode.PARAMS_ERROR, "错误，不能运用空提示词进行代理（Cannot run agent with empty user prompt）"));
                     sseEmitter.complete();
                     return;
                 }
@@ -128,20 +130,20 @@ public abstract class BaseAgent {
                     String result = "Step " + stepNumber + ": " + stepResult;
                     results.add(result);
                     // 输出每一步的结果到sse
-                    sseEmitter.send(result);
+                    sseEmitter.send(ResultUtils.success(result));
                 }
                 // 检查是否超出步骤限制
                 if (currentStep >= maxSteps) {
                     state = AgentState.FINISHED;
                     results.add("Terminated: Reached max steps (" + maxSteps + ")");
-                    sseEmitter.send("执行结束，达到最大步骤（Terminated: Reached max steps (" + maxSteps + ")）");
+                    sseEmitter.send(ResultUtils.success("执行结束，达到最大步骤（Terminated: Reached max steps (" + maxSteps + ")）"));
                 }
                 sseEmitter.complete();
             } catch (Exception e) {
                 state = AgentState.ERROR;
                 log.error("Error executing agent", e);
                 try {
-                    sseEmitter.send("执行错误" + e.getMessage());
+                    sseEmitter.send(ResultUtils.error(ErrorCode.SYSTEM_ERROR, "执行错误" + e.getMessage()));
                     sseEmitter.complete();
                 } catch (IOException ex) {
                     sseEmitter.completeWithError(ex);

@@ -92,7 +92,7 @@ public class ToolCallAgent extends ReActAgent{
             log.info("{}选择了工具：{}个", getName(), toolCalls.size());
             String toolCallInfo = toolCalls.stream()
                     .map(toolCall -> String.format("工具名称：%s, 工具参数：%s", toolCall.name(), toolCall.arguments()))
-                    .collect(Collectors.joining("/n"));
+                    .collect(Collectors.joining("\n"));
             log.info(toolCallInfo);
             // 如果不需要调用工具
             if (toolCalls.isEmpty()) {
