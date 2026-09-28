@@ -165,7 +165,18 @@
 <!--            <version>4.3.1</version>-->
 <!--            <scope>compile</scope>-->
 <!--        </dependency>-->
-
+        <!--   Resilience4j 重试     -->
+        <!-- Resilience4j Spring Boot 3 专用模块 -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.2.0</version>
+        </dependency>
+        <!-- AOP 支持，注解驱动必须加 -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-aop</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
